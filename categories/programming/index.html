@@ -101,9 +101,122 @@
 <li>返回的数据总是惟一的吗?(例如搜索查询)</li>
 <li>使用缓存后，命中率如何？</li>
 </ul>
-<h1 id="参考：-https-www-ehcache-org-documentation-3-9-caching-patterns-html"><a href="#参考：-https-www-ehcache-org-documentation-3-9-caching-patterns-html" class="headerlink" title="参考： https://www.ehcache.org/documentation/3.9/caching-patterns.html"></a>参考： <a target="_blank" rel="noopener" href="https://www.ehcache.org/documentation/3.9/caching-patterns.html">https://www.ehcache.org/documentation/3.9/caching-patterns.html</a></h1></div></article></div><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2021-11-29T05:44:07.000Z" title="11/29/2021, 1:44:07 PM">2021-11-29</time>发表</span><span class="level-item"><time dateTime="2021-12-01T07:14:13.661Z" title="12/1/2021, 3:14:13 PM">2021-12-01</time>更新</span><span class="level-item"><a class="link-muted" href="/categories/programming/">编程</a></span><span class="level-item">几秒读完 (大约33个字)</span></div></div><h1 class="title is-3 is-size-4-mobile"><a class="link-muted" href="/2021/11/29/catch-redis/">深入Cache(4) --- 分布式缓存</a></h1><div class="content"><blockquote>
-<p>不同于本地缓存，分布式缓存将cache和服务独立开，可个服务之间可以共享。</p>
+<h1 id="参考：-https-www-ehcache-org-documentation-3-9-caching-patterns-html"><a href="#参考：-https-www-ehcache-org-documentation-3-9-caching-patterns-html" class="headerlink" title="参考： https://www.ehcache.org/documentation/3.9/caching-patterns.html"></a>参考： <a target="_blank" rel="noopener" href="https://www.ehcache.org/documentation/3.9/caching-patterns.html">https://www.ehcache.org/documentation/3.9/caching-patterns.html</a></h1></div></article></div><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2021-11-29T05:44:07.000Z" title="11/29/2021, 1:44:07 PM">2021-11-29</time>发表</span><span class="level-item"><time dateTime="2021-12-03T07:17:41.958Z" title="12/3/2021, 3:17:41 PM">2021-12-03</time>更新</span><span class="level-item"><a class="link-muted" href="/categories/programming/">编程</a></span><span class="level-item">14 分钟读完 (大约2108个字)</span></div></div><h1 class="title is-3 is-size-4-mobile"><a class="link-muted" href="/2021/11/29/catch-redis/">深入Cache(4) --- 分布式缓存</a></h1><div class="content"><blockquote>
+<p>不同于本地缓存，分布式缓存将cache和服务独立开，使得多个服务之间可以共享，共同使用cache。</p>
 </blockquote>
+<h1 id="分布式缓存：-Redis-vs-Memcached"><a href="#分布式缓存：-Redis-vs-Memcached" class="headerlink" title="分布式缓存： Redis  vs Memcached"></a>分布式缓存： Redis  vs Memcached</h1><blockquote>
+<p>因为公司主要用的redis，所以没做Memcached的整理，相比之下，Memcached真得只是cache，没有persistence的支持，也不支持replication，数据类型单一,只能存可被Serializable/unSerializable的数据, 操作简单。所以重心放在redis上, 简单做个比较。</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>feat</th>
+<th>Memcached</th>
+<th>Redis</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>opensource</td>
+<td>Yes</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>(multi)get,set</td>
+<td>Yes</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>incr/decr</td>
+<td>Yes</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>delete/expiration</td>
+<td>Yes</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Range Query</td>
+<td>-</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>DataType</td>
+<td>-</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>persistence</td>
+<td>-</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>replication</td>
+<td>-</td>
+<td>Yes</td>
+</tr>
+</tbody></table>
+<blockquote>
+<p>Redis对persistence和replication的支持，使得它可做为一个NoSql数据库，这里, <strong>我们仅仅把它当做一个cache</strong>.</p>
+</blockquote>
+<h1 id="分布式缓存需要面临的问题"><a href="#分布式缓存需要面临的问题" class="headerlink" title="分布式缓存需要面临的问题"></a>分布式缓存需要面临的问题</h1><h2 id="数据量的伸缩"><a href="#数据量的伸缩" class="headerlink" title="数据量的伸缩"></a>数据量的伸缩</h2><p>原因：多服务共同使用一个redis集群，缓存的数据量会随着时间的增加，业务的增加而增加，单个redis的节点不能长期支持，这时就需要多个node一起管理。那么数据又如何比较均衡的分布在这些节点上呢？这是服务端常面临的问题，解决的方式是<strong>分布式世界通用</strong>的: sharding(分片)。 常用的sharding算法有以下几种：</p>
+<ul>
+<li>范围映射：根据key的size范围，比如0<del>100，环境提供2个节点，node1分配0</del>50， node2 51~100，方法简单，但不好扩充，要求范围大小是固定的。不好扩展。</li>
+<li>hash映射: 算法：hash(key)%numberofnode，得到一个数字，为node节点编号，那么该key就由该node负责。 缺点：node改变，rebalancing代价太大，所有数据都可能要移动</li>
+<li>一致性hash：以后写分布式时再介绍。</li>
+</ul>
+<blockquote>
+<p>分布式缓存使用Sharing后还有一个缺点: 涉及多个key的操作不能被支持，因为这些Key可能会映射到不同的node. 所以只能操作单key.</p>
+</blockquote>
+<h2 id="访问量的伸缩"><a href="#访问量的伸缩" class="headerlink" title="访问量的伸缩"></a>访问量的伸缩</h2><p>假如我们的key只放在一个node，其它node没有备份，单机能承载的QPS是有限的，想要承担更高的QPS, 则可以通过读写分离来实现。对于cache来说，需要有多个replications. 这样我们可以通过master负责写，slave可以承担读的请求处理，承担高QPS.</p>
+<h2 id="单点故障-failover"><a href="#单点故障-failover" class="headerlink" title="单点故障(failover)"></a>单点故障(failover)</h2><p>解决前一个访问量的问题用到的replications，也相应的能解决单点故障的问题，实现HA。不再缀述。</p>
+<h1 id="Redis-Cluster-【optional：与分布式相关，与cache无关】"><a href="#Redis-Cluster-【optional：与分布式相关，与cache无关】" class="headerlink" title="Redis Cluster 【optional：与分布式相关，与cache无关】"></a>Redis Cluster 【optional：与分布式相关，与cache无关】</h1><p>分布式要考虑几个环环相扣的问题。记住，我们这里只把redis当cache, 不当db用。</p>
+<blockquote>
+<p>1.数据量大，且需要提高并行度，需要分片，如何sharding? 答：选取分片算法。–&gt; 2.选定分片算法后，要想高可用HA，就需要每个sharding有备份（复制），怎么做?<br>–&gt;  3.采用master-slave方式复制 –&gt; 4.master节点或者slave节点down点后如何处理？（拆分为：故障恢复，容错，leader选举等细分问题）<br> –&gt; 5.master-slave一致性要求要多高？过高的一致性影响低性能，可能用户不接受。（一致性的问题）</p>
+</blockquote>
+<h2 id="问题一-Sharding"><a href="#问题一-Sharding" class="headerlink" title="问题一: Sharding"></a>问题一: Sharding</h2><p>首先是分布式中的分（sharding）方案，Redis 集群分片算法，没有使用<strong>一致性hash</strong>, 而是<strong>hash映射</strong>，Redis集群固定有16384个哈希槽（slot），分给集群中固的节点。客户端内置一个路由规则，根据redis master节点数，和key的hash值，选取相应的分区。</p>
+<h2 id="问题二：Redis选取的复制方案"><a href="#问题二：Redis选取的复制方案" class="headerlink" title="问题二：Redis选取的复制方案"></a>问题二：Redis选取的复制方案</h2><blockquote>
+<p>复制的工作原理，是要先选取leader，以节点为leader还是在分片层面，为各分片选leader？ 选取leader后，要决定是采用【sync】，【async】还是【半同步】复制方式？</p>
+</blockquote>
+<h3 id="初始化leader-master-和slave"><a href="#初始化leader-master-和slave" class="headerlink" title="初始化leader(master)和slave"></a>初始化leader(master)和slave</h3><p>在配置cluster时，会根据配置提供的node数量和replicas的值提供方案给管理人员，配置完成后，初始的master和slave就自动决定了。</p>
+<p><strong>查看集群信息</strong></p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">$</span><span class="bash"> redis-cli -p 7000 cluster nodes</span></span><br><span class="line">3fc783611028b1707fd65345e763befb36454d73 127.0.0.1:7004 slave 3e3a6cb0d9a9a87168e266b0a0b24026c0aae3f0 0 1385503418521 0 connected</span><br><span class="line">a211e242fc6b22a9427fed61285e85892fa04e08 127.0.0.1:7003 slave 97a3a64667477371c4479320d683e4c8db5858b1 0 1385503419023 0 connected</span><br><span class="line">97a3a64667477371c4479320d683e4c8db5858b1 :0 myself,master - 0 0 0 connected 0-5959 10922-11422</span><br><span class="line">3c3a0c74aae0b56170ccb03a76b60cfe7dc1912e 127.0.0.1:7005 master - 0 1385503419023 3 connected 11423-16383</span><br><span class="line">3e3a6cb0d9a9a87168e266b0a0b24026c0aae3f0 127.0.0.1:7001 master - 0 1385503417005 0 connected 5960-10921</span><br><span class="line">2938205e12de373867bf38f1ca29d31d0ddb3e46 127.0.0.1:7002 slave 3c3a0c74aae0b56170ccb03a76b60cfe7dc1912e 0 1385503418016 3 connected</span><br><span class="line"></span><br></pre></td></tr></table></figure>
+
+<h3 id="复制方式"><a href="#复制方式" class="headerlink" title="复制方式"></a>复制方式</h3><p>Redis是有多个master,分个每区都有自己的leader。 Redis为了在部分或者大部份节点无法通信下仍然可用，选择了master-slave的复制模型，且每个啥希槽（slot）都有1个master, 和n多个replicas.(1&lt;=n&lt;N, N为机器总数)。<br>并且Redis不同供**强一致性保证**，完整的过程是：1.client更新数据到master -&gt; 2.master记录操作log后直接回复client -&gt; 3.然后master再将操作log同步给slave节点。<br>从上面我们看出：1.从slave读取数据，可能是旧数据;2.master down机后，可能会丢失log，操作失效。</p>
+<p>结论：redis采用的是分片后<strong>多主复制</strong>，<strong>异步复制</strong>的方式， 非<strong>强一致性</strong>。</p>
+<p><img src="/images/cache-redis/redis-cluster.png" alt="Redis-cluster"></p>
+<blockquote>
+<p>图中，一个多个redis实例，可以部署中一个node上，使用不同的端口。节省资源。</p>
+</blockquote>
+<h2 id="问题三：Leader选举，master节点down掉，Redis如何选举并同步的？"><a href="#问题三：Leader选举，master节点down掉，Redis如何选举并同步的？" class="headerlink" title="问题三：Leader选举，master节点down掉，Redis如何选举并同步的？"></a>问题三：Leader选举，master节点down掉，Redis如何选举并同步的？</h2><p>这就是共识算法，所有slave节点，在面临leader挂掉时,如何快速的搭成一致，选取一个新的Leader.<br>Redis采用的是gossip协议，流言成真。BitCoin就是使用了该协议来传播交易区块信息。 Redis Cluster要求至少有3个master。 就上图我们举例,假如redis-master-B挂了。</p>
+<h3 id="投票顺利，选举成功的过程"><a href="#投票顺利，选举成功的过程" class="headerlink" title="投票顺利，选举成功的过程"></a>投票顺利，选举成功的过程</h3><p><img src="/images/cache-redis/leader-election-suc.png" alt="leader-election-suc"></p>
+<h3 id="投票失败，再次选举"><a href="#投票失败，再次选举" class="headerlink" title="投票失败，再次选举"></a>投票失败，再次选举</h3><p><img src="/images/cache-redis/leader-election-suc.png" alt="leader-election-failure"></p>
+<h2 id="问题四：当slave的同步数据出错或者新的master产生，master与slave之直数据不一样，Redis容错是怎么做的？"><a href="#问题四：当slave的同步数据出错或者新的master产生，master与slave之直数据不一样，Redis容错是怎么做的？" class="headerlink" title="问题四：当slave的同步数据出错或者新的master产生，master与slave之直数据不一样，Redis容错是怎么做的？"></a>问题四：当slave的同步数据出错或者新的master产生，master与slave之直数据不一样，Redis容错是怎么做的？</h2><p>Redis的处理：数据只从Master节点流向Slave节点。也就是说，如果新选举的master的log少于slave的log,以master为主，当然就会有log丢失的风险。同步有[全量复制]和[增量复制].<br><strong>增量复制的场景</strong>：</p>
+<ul>
+<li>正常工作时，master向slave同步新的log.</li>
+<li>master和slave断开后，slave重新连上master,重新获取失连过程中的log.</li>
+</ul>
+<p><strong>全量同步的场景</strong></p>
+<ul>
+<li>无法进行部分同步时，全量同步。</li>
+</ul>
+<blockquote>
+<p>election 之后的被提升为leader的slave仍然会记录旧master，旧的replicationID和offset(记录偏移位置)，待旧的master返回时，可以在一段时间内继续接受这些丢失的Log。新的master使用新的replicationID。 参考：<a target="_blank" rel="noopener" href="https://redis.io/topics/replication">https://redis.io/topics/replication</a></p>
+</blockquote>
+<h1 id="Redis-集群的配置"><a href="#Redis-集群的配置" class="headerlink" title="Redis 集群的配置"></a>Redis 集群的配置</h1><blockquote>
+<p>我们不一定非要用上面介绍的redis cluster（也可以就单机redis，比如本地开发）, 根据自己服务要使用的缓存大小，数据的重要性和使用的场景可以选择以下几种方式：</p>
+</blockquote>
+<h2 id="主从复制模式-MASTER-SLAVE"><a href="#主从复制模式-MASTER-SLAVE" class="headerlink" title="主从复制模式 MASTER-SLAVE"></a>主从复制模式 MASTER-SLAVE</h2><blockquote>
+<p>即一个master, 多个slave， 不分片。 不能处理上面说的故障转换和容错，因为无法进行leader选举。 也就不是分布式缓存了。</p>
+</blockquote>
+<h2 id="Sentinel-哨兵-模式"><a href="#Sentinel-哨兵-模式" class="headerlink" title="Sentinel(哨兵)模式"></a>Sentinel(哨兵)模式</h2><blockquote>
+<p>即在主从复制模式上，增加了哨兵，由哨兵来帮助处理故障转移，leader选举。 属于高可用的 (HA) MASTER-SLAVE，同样，仍然不分片。<br><img src="/images/cache-redis/redis-sentinel.png" alt="redis-sentinel"></p>
+</blockquote>
+<h2 id="分布式的Redis-Cluster"><a href="#分布式的Redis-Cluster" class="headerlink" title="分布式的Redis Cluster"></a>分布式的Redis Cluster</h2><h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h2><ol>
+<li>只是使用redis进行测试，不需要HA，单机redis满足需求。</li>
+<li>需要比较稳定的HA的，数据量完成达到海量，可以不扩展的，Sentinel。</li>
+<li>数据海量的超过了单机RAM，redis cluster。</li>
+</ol>
 </div></article></div><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2021-11-23T02:05:47.000Z" title="11/23/2021, 10:05:47 AM">2021-11-23</time>发表</span><span class="level-item"><time dateTime="2021-11-30T08:38:57.161Z" title="11/30/2021, 4:38:57 PM">2021-11-30</time>更新</span><span class="level-item"><a class="link-muted" href="/categories/programming/">编程</a></span><span class="level-item">14 分钟读完 (大约2066个字)</span></div></div><h1 class="title is-3 is-size-4-mobile"><a class="link-muted" href="/2021/11/23/cache-tech/">深入Cache(1) --- CPU和主存之间</a></h1><div class="content"><blockquote>
 <p>本次知识梳理，用3W法。 what, why, how?</p>
 </blockquote>
